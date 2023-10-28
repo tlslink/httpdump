@@ -1,0 +1,87 @@
+# This workflow will build a golang project
+# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-go
+
+name: Release
+
+on:
+  workflow_dispatch
+
+jobs:
+  setup:
+    name: Setup
+    uses: ./.github/workflows/release-setup.yml
+  build:
+    name: Build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        build: [linux, linux-aarch64, linux-armv7, linux-mipsle, windows]
+        include:
+        - build: linux
+          os: ubuntu-20.04
+          archive-name: httpdump-linux-amd64.tar.gz
+        - build: linux-aarch64
+          os: ubuntu-20.04
+          archive-name: httpdump-linux-aarch64.tar.gz
+        - build: linux-armv7
+          os: ubuntu-20.04
+          archive-name: httpdump-linux-armv7.tar.gz
+        - build: linux-mipsle
+          os: ubuntu-20.04
+          archive-name: httpdump-linux-mipsle.tar.gz
+        - build: windows
+          os: windows-2019
+          archive-name: httpdump-windows10-amd64.7z
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: 'recursive'
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: 1.20.10
+    - name: Install dependencies
+      run: go get .
+    - name: Build
+      shell: bash
+      run: |
+        if [ "${{ matrix.build }}" = "linux" ]; then
+          go build -trimpath -ldflags "-s -w" -o httpdump httpdump.go
+        elif [ "${{ matrix.build }}" = "linux-aarch64" ]; then
+          GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-s -w" -o httpdump httpdump.go
+        elif [ "${{ matrix.build }}" = "linux-armv7" ]; then
+          GOOS=linux GOARM=7 GOARCH=arm go build -trimpath -ldflags "-s -w" -o httpdump httpdump.go
+        elif [ "${{ matrix.build }}" = "linux-mipsle" ]; then
+          GOOS=linux GOARCH=mipsle go build -trimpath -ldflags "-s -w" -o httpdump httpdump.go
+        elif [ "${{ matrix.build }}" = "windows" ]; then
+          go build -trimpath -ldflags "-s -w" -o httpdump.exe httpdump.go
+        fi
+    - name: Build archive
+      shell: bash
+      run: |
+        mkdir archive
+        cp LICENSE README.md archive/
+        # ls -lR
+        if [ "${{ matrix.build }}" = "windows" ]; then
+          cp httpdump.exe ./archive/
+          cd archive
+          7z a "${{ matrix.archive-name }}" LICENSE README.md httpdump.exe
+        else
+          cp httpdump ./archive/
+          cd archive
+          tar -czf "${{ matrix.archive-name }}" LICENSE README.md httpdump
+        fi
+    - name: Continuous release
+      uses: softprops/action-gh-release@v1
+      if: startsWith(github.ref, 'refs/heads/')
+      with:
+        prerelease: false
+        files: archive/${{ matrix.archive-name }}
+        tag_name: continuous
+        
+    - if: startsWith(github.ref, 'refs/tags/')
+      name: Tagged release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: archive/${{ matrix.archive-name }}
+        name: Release build (${{ github.ref_name }})
